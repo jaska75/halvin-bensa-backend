@@ -6,7 +6,6 @@ import re
 
 app = FastAPI(title="Halvin Bensa API")
 
-# Sallitaan pyynnöt Android-sovellukselta
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,10 +20,6 @@ def read_root():
 
 @app.get("/api/stations")
 def get_stations(lat: float = None, lon: float = None):
-    """
-    Palauttaa huoltoasemat ja niiden ajantasaiset hinnat.
-    Tässä on mukana verkkoharavointilogiikka julkiselta sivustolta.
-    """
     url = "https://www.polttoaine.net/Helsinki"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -36,14 +31,14 @@ def get_stations(lat: float = None, lon: float = None):
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
-            # Etsitään hintataulukon rivit
             table = soup.find("table")
             if table:
-                rows = table.find_all("tr")[1:] # Hypätään otsikorivin yli
+                rows = table.find_all("tr")[1:]
                 for row in rows:
                     cols = row.find_all("td")
-                    if len(cols) >= 5:
+                    if len(cols) >= 4:
                         name = cols[0].text.strip()
+                        # Tarkistetaan sarakkeet tarkemmin
                         p_95 = parse_price(cols[1].text)
                         p_98 = parse_price(cols[2].text)
                         p_diesel = parse_price(cols[3].text)
@@ -61,7 +56,7 @@ def get_stations(lat: float = None, lon: float = None):
     except Exception as e:
         print(f"Haravointivirhe: {e}")
 
-    # Jos haravointi ei palauta tuloksia (esim. sivuston muutos), palautetaan varadata
+    # Varadata, jos haravointi ei tuota tulosta tai hinta puuttuu
     if not stations:
         stations = [
             {
@@ -100,10 +95,19 @@ def get_stations(lat: float = None, lon: float = None):
     }
 
 def parse_price(price_str: str):
-    """Apufunktio hinnan muuntamiseksi liukuluvuksi (float)."""
+    """Apufunktio hinnan muuntamiseksi liukuluvuksi (float). Varmistaa ettei oteta vääriä lukuja."""
     try:
         clean = price_str.strip().replace(",", ".")
-        match = re.search(r"\d+\.\d+", clean)
-        return float(match.group()) if match else None
+        # Etsitään desimaaliluku, esim 1.849
+        match = re.search(r"\b[1-2]\.\d{3}\b", clean)
+        if match:
+            return float(match.group())
+        # Yleisempi haku, jos hinta on muuta muotoa
+        match_general = re.search(r"\d+\.\d+", clean)
+        val = float(match_general.group()) if match_general else None
+        # Suodatetaan pois mahdolliset virheelliset isot luvut (esim. puhelinnumerot tai id:t)
+        if val and 0.5 < val < 3.0:
+            return val
+        return None
     except:
         return None
